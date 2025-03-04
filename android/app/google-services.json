@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "72076029788",
+    "project_id": "jk-product-f5be8",
+    "storage_bucket": "jk-product-f5be8.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:72076029788:android:f430173f5ab0050ca19b99",
+        "android_client_info": {
+          "package_name": "com.example.jkproduct"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC1AWr_2sdJ5IN6PBPjD7bLxZcHy41fb9I"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
