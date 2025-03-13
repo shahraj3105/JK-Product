@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/auth_service.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'UserProfileScreen.dart';
 
 class HomeScreen extends StatelessWidget {
   final AuthService _authService = AuthService();
@@ -16,6 +17,15 @@ class HomeScreen extends StatelessWidget {
         ),
         backgroundColor: Colors.brown,
         actions: [
+          IconButton(
+            icon: Icon(Icons.person),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => UserProfileScreen()),
+              );
+            },
+          ),
           IconButton(
             icon: Icon(Icons.shopping_cart),
             onPressed: () {
@@ -409,78 +419,25 @@ class _CartScreenState extends State<CartScreen> {
                     child: ElevatedButton(
                       onPressed: Cart.cartItems.isEmpty
                           ? null
-                          : () async {
-                              try {
-                                String orderId = _generateOrderId();
-                                double totalAmount = Cart.cartItems.fold(
-                                  0.0,
-                                  (sum, item) =>
-                                      sum +
-                                      (item['price']?.toDouble() ?? 0.0) *
-                                          (item['quantity'] ?? 1),
-                                );
-
-                                String? userEmail = await _authService.getCurrentUserEmail();
-                                if (userEmail == null) {
-                                  throw 'User not authenticated. Please log in.';
-                                }
-
-                                // Fetch user's address from Firestore
-                                DocumentSnapshot userDoc = await FirebaseFirestore.instance
-                                    .collection('users')
-                                    .doc(_authService.getCurrentUserId()) // Assuming this method exists
-                                    .get();
-                                String userAddress = userDoc.exists
-                                    ? (userDoc['address'] ?? 'No address provided')
-                                    : 'No address provided';
-
-                                // Place order in Firestore
-                                await FirebaseFirestore.instance
-                                    .collection('orders')
-                                    .doc(orderId)
-                                    .set({
-                                  'orderId': orderId,
-                                  'items': Cart.cartItems.map((item) => {
-                                        'name': item['name'],
-                                        'price': item['price'],
-                                        'quantity': item['quantity'],
-                                        'imageUrl': item['imageUrl'],
-                                      }).toList(),
-                                  'totalAmount': totalAmount,
-                                  'status': 'pending',
-                                  'createdAt': Timestamp.now(),
-                                  'userEmail': userEmail,
-                                  'userAddress': userAddress,
-                                });
-
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Order placed successfully! Order ID: $orderId'),
-                                    duration: Duration(seconds: 2),
+                          : () {
+                              final orderId = _generateOrderId();
+                              final totalAmount = Cart.cartItems.fold(
+                                0.0,
+                                (sum, item) =>
+                                    sum +
+                                    (item['price']?.toDouble() ?? 0.0) *
+                                        (item['quantity'] ?? 1),
+                              );
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => PreInvoiceScreen(
+                                    orderId: orderId,
+                                    items: List<Map<String, dynamic>>.from(Cart.cartItems),
+                                    totalAmount: totalAmount,
                                   ),
-                                );
-
-                                Navigator.pushReplacement(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (context) => InvoiceScreen(
-                                      orderId: orderId,
-                                      items: List<Map<String, dynamic>>.from(Cart.cartItems),
-                                      totalAmount: totalAmount,
-                                    ),
-                                  ),
-                                );
-
-                                Cart.cartItems.clear();
-                              } catch (e) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Error placing order: $e'),
-                                    backgroundColor: Colors.red,
-                                    duration: Duration(seconds: 3),
-                                  ),
-                                );
-                              }
+                                ),
+                              );
                             },
                       child: Text('Place Order'),
                       style: ElevatedButton.styleFrom(
@@ -503,24 +460,125 @@ class _CartScreenState extends State<CartScreen> {
   }
 }
 
-// Invoice Screen
-class InvoiceScreen extends StatelessWidget {
+// New PreInvoiceScreen
+class PreInvoiceScreen extends StatefulWidget {
   final String orderId;
   final List<Map<String, dynamic>> items;
   final double totalAmount;
 
-  InvoiceScreen({
+  PreInvoiceScreen({
     required this.orderId,
     required this.items,
     required this.totalAmount,
   });
 
   @override
+  _PreInvoiceScreenState createState() => _PreInvoiceScreenState();
+}
+
+class _PreInvoiceScreenState extends State<PreInvoiceScreen> {
+  final AuthService _authService = AuthService();
+
+  void _showPaymentModeDialog(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Select Payment Mode'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              title: Text('Cash on Delivery'),
+              onTap: () => _placeOrder(context, 'Cash on Delivery'),
+            ),
+            ListTile(
+              title: Text('Online Payment'),
+              onTap: () {
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Online Payment is not yet implemented.'),
+                    duration: Duration(seconds: 2),
+                  ),
+                );
+              },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('Cancel'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _placeOrder(BuildContext context, String paymentMode) async {
+    if (paymentMode != 'Cash on Delivery') {
+      Navigator.pop(context);
+      return;
+    }
+
+    try {
+      String? userEmail = await _authService.getCurrentUserEmail();
+      if (userEmail == null) {
+        throw 'User not authenticated. Please log in.';
+      }
+
+      DocumentSnapshot userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(_authService.getCurrentUserId())
+          .get();
+      String userAddress = userDoc.exists
+          ? (userDoc['address'] ?? 'No address provided')
+          : 'No address provided';
+
+      await FirebaseFirestore.instance.collection('orders').doc(widget.orderId).set({
+        'orderId': widget.orderId,
+        'items': widget.items.map((item) => {
+              'name': item['name'],
+              'price': item['price'],
+              'quantity': item['quantity'],
+              'imageUrl': item['imageUrl'],
+            }).toList(),
+        'totalAmount': widget.totalAmount,
+        'status': 'pending',
+        'createdAt': Timestamp.now(),
+        'userEmail': userEmail,
+        'userAddress': userAddress,
+        'paymentMode': paymentMode,
+      });
+
+      Navigator.pop(context); // Close dialog
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Order placed successfully! Order ID: ${widget.orderId}'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      Cart.cartItems.clear();
+      Navigator.pushNamedAndRemoveUntil(context, '/home', (route) => false); // Redirect to HomeScreen
+    } catch (e) {
+      Navigator.pop(context); // Close dialog on error
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error placing order: $e'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          'Invoice',
+          'Invoice Preview',
           style: GoogleFonts.poppins(color: Colors.white),
         ),
         backgroundColor: Colors.brown,
@@ -551,7 +609,7 @@ class InvoiceScreen extends StatelessWidget {
               ),
               SizedBox(height: 10),
               Text(
-                'Order ID: $orderId',
+                'Order ID: ${widget.orderId}',
                 style: GoogleFonts.poppins(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
@@ -561,9 +619,9 @@ class InvoiceScreen extends StatelessWidget {
               SizedBox(height: 20),
               Expanded(
                 child: ListView.builder(
-                  itemCount: items.length,
+                  itemCount: widget.items.length,
                   itemBuilder: (context, index) {
-                    final item = items[index];
+                    final item = widget.items[index];
                     final quantity = item['quantity'] ?? 1;
                     final price = item['price']?.toDouble() ?? 0.0;
                     final subtotal = price * quantity;
@@ -613,7 +671,7 @@ class InvoiceScreen extends StatelessWidget {
                       ),
                     ),
                     Text(
-                      '₹${totalAmount.toStringAsFixed(2)}',
+                      '₹${widget.totalAmount.toStringAsFixed(2)}',
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -625,15 +683,8 @@ class InvoiceScreen extends StatelessWidget {
               ),
               SizedBox(height: 20),
               ElevatedButton(
-                onPressed: () {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text('Proceed to payment (TODO)'),
-                      duration: Duration(seconds: 2),
-                    ),
-                  );
-                },
-                child: Text('Proceed to Payment'),
+                onPressed: () => _showPaymentModeDialog(context),
+                child: Text('Confirm Order'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.brown,
                   minimumSize: Size(double.infinity, 50),
