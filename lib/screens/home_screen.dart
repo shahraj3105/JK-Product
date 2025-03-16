@@ -69,6 +69,7 @@ class HomeScreen extends StatelessWidget {
               ),
             ),
             Expanded(
+              flex: 2, // Give more space to products
               child: StreamBuilder<QuerySnapshot>(
                 stream: FirebaseFirestore.instance
                     .collection('products')
@@ -78,11 +79,9 @@ class HomeScreen extends StatelessWidget {
                   if (snapshot.hasError) {
                     return Center(child: Text('Error: ${snapshot.error}'));
                   }
-
                   if (snapshot.connectionState == ConnectionState.waiting) {
                     return Center(child: CircularProgressIndicator());
                   }
-
                   if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
                     return Center(
                       child: Text(
@@ -182,6 +181,95 @@ class HomeScreen extends StatelessWidget {
                 },
               ),
             ),
+            Padding(
+              padding: EdgeInsets.all(16.0),
+              child: Text(
+                'Order History',
+                style: GoogleFonts.poppins(
+                  fontSize: 24,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.brown[800],
+                ),
+              ),
+            ),
+            Expanded(
+              flex: 1, // Less space for order history
+              child: FutureBuilder<String?>(
+                future: _authService.getCurrentUserEmail(),
+                builder: (context, emailSnapshot) {
+                  if (emailSnapshot.connectionState == ConnectionState.waiting) {
+                    return Center(child: CircularProgressIndicator());
+                  }
+                  if (emailSnapshot.hasError || emailSnapshot.data == null) {
+                    return Center(
+                      child: Text(
+                        'Error fetching user data',
+                        style: TextStyle(fontSize: 18, color: Colors.grey),
+                      ),
+                    );
+                  }
+
+                  final userEmail = emailSnapshot.data!;
+                  return StreamBuilder<QuerySnapshot>(
+                    stream: FirebaseFirestore.instance
+                        .collection('orders')
+                        .where('userEmail', isEqualTo: userEmail)
+                        .orderBy('createdAt', descending: true)
+                        .snapshots(),
+                    builder: (context, snapshot) {
+                      if (snapshot.hasError) {
+                        return Center(child: Text('Error: ${snapshot.error}'));
+                      }
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return Center(child: CircularProgressIndicator());
+                      }
+                      if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                        return Center(
+                          child: Text(
+                            'No previous orders',
+                            style: TextStyle(fontSize: 18, color: Colors.grey),
+                          ),
+                        );
+                      }
+
+                      return ListView.builder(
+                        padding: EdgeInsets.symmetric(horizontal: 16),
+                        itemCount: snapshot.data!.docs.length,
+                        itemBuilder: (context, index) {
+                          final order = snapshot.data!.docs[index];
+                          final orderData = order.data() as Map<String, dynamic>;
+                          final totalAmount = orderData['totalAmount']?.toStringAsFixed(2) ?? '0.0';
+                          final status = orderData['status'] ?? 'Unknown';
+
+                          return GestureDetector(
+                            onTap: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => OrderHistoryDetailsScreen(orderData: orderData),
+                                ),
+                              );
+                            },
+                            child: Card(
+                              elevation: 4,
+                              margin: EdgeInsets.symmetric(vertical: 8),
+                              child: ListTile(
+                                title: Text('Order ID: ${orderData['orderId']}'),
+                                subtitle: Text('Total: ₹$totalAmount\nStatus: $status'),
+                                trailing: Icon(
+                                  status == 'pending' ? Icons.pending : Icons.check_circle,
+                                  color: status == 'pending' ? Colors.orange : Colors.green,
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      );
+                    },
+                  );
+                },
+              ),
+            ),
           ],
         ),
       ),
@@ -189,7 +277,7 @@ class HomeScreen extends StatelessWidget {
   }
 }
 
-// Product Details Screen
+// Product Details Screen (unchanged)
 class ProductDetailsScreen extends StatelessWidget {
   final Map<String, dynamic> productData;
 
@@ -302,9 +390,7 @@ class ProductDetailsScreen extends StatelessWidget {
   }
 }
 
-// ... (HomeScreen and ProductDetailsScreen remain unchanged as provided)
-
-// Cart Screen with Quantity Selection
+// Cart Screen (unchanged)
 class CartScreen extends StatefulWidget {
   @override
   _CartScreenState createState() => _CartScreenState();
@@ -460,7 +546,7 @@ class _CartScreenState extends State<CartScreen> {
   }
 }
 
-// New PreInvoiceScreen
+// PreInvoiceScreen (unchanged)
 class PreInvoiceScreen extends StatefulWidget {
   final String orderId;
   final List<Map<String, dynamic>> items;
@@ -701,7 +787,216 @@ class _PreInvoiceScreenState extends State<PreInvoiceScreen> {
   }
 }
 
-// Cart Management Class
+// New OrderHistoryDetailsScreen
+// New OrderHistoryDetailsScreen with Cancel Button
+class OrderHistoryDetailsScreen extends StatefulWidget {
+  final Map<String, dynamic> orderData;
+
+  OrderHistoryDetailsScreen({required this.orderData});
+
+  @override
+  _OrderHistoryDetailsScreenState createState() => _OrderHistoryDetailsScreenState();
+}
+
+class _OrderHistoryDetailsScreenState extends State<OrderHistoryDetailsScreen> {
+  final AuthService _authService = AuthService();
+  bool _isLoading = false;
+
+  Future<void> _cancelOrder() async {
+    setState(() => _isLoading = true);
+    try {
+      await FirebaseFirestore.instance
+          .collection('orders')
+          .doc(widget.orderData['orderId'])
+          .update({
+        'status': 'cancelled',
+        'cancelledAt': Timestamp.now(),
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Order cancelled successfully'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      // Refresh UI or pop back
+      setState(() => _isLoading = false);
+    } catch (e) {
+      setState(() => _isLoading = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error cancelling order: $e'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = widget.orderData['items'] as List<dynamic>;
+    final totalAmount = widget.orderData['totalAmount']?.toStringAsFixed(2) ?? '0.0';
+    final status = widget.orderData['status'] ?? 'Unknown';
+    final isPending = status == 'pending';
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          'Order Details',
+          style: GoogleFonts.poppins(color: Colors.white),
+        ),
+        backgroundColor: Colors.brown,
+      ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Color(0xFFFFFDE7),
+              Color(0xFFFFF9C4),
+            ],
+          ),
+        ),
+        child: Padding(
+          padding: EdgeInsets.all(16.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Order ID: ${widget.orderData['orderId']}',
+                style: GoogleFonts.poppins(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.brown[800],
+                ),
+              ),
+              SizedBox(height: 10),
+              Text(
+                'Customer: ${widget.orderData['userEmail']}',
+                style: TextStyle(fontSize: 16, color: Colors.brown[800]),
+              ),
+              SizedBox(height: 10),
+              Text(
+                'Address: ${widget.orderData['userAddress'] ?? 'No address provided'}',
+                style: TextStyle(fontSize: 16, color: Colors.brown[800]),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+              SizedBox(height: 10),
+              Text(
+                'Status: $status',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: status == 'pending' ? Colors.orange : (status == 'completed' ? Colors.green[700] : Colors.red),
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              SizedBox(height: 10),
+              Text(
+                'Payment Mode: ${widget.orderData['paymentMode'] ?? 'Unknown'}',
+                style: TextStyle(fontSize: 16, color: Colors.brown[800]),
+              ),
+              SizedBox(height: 20),
+              Text(
+                'Products',
+                style: GoogleFonts.poppins(
+                  fontSize: 18,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.brown[800],
+                ),
+              ),
+              SizedBox(height: 10),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: items.length,
+                  itemBuilder: (context, index) {
+                    final item = items[index] as Map<String, dynamic>;
+                    final quantity = item['quantity'] ?? 1;
+                    final price = item['price']?.toDouble() ?? 0.0;
+                    final subtotal = price * quantity;
+
+                    return Card(
+                      elevation: 4,
+                      margin: EdgeInsets.symmetric(vertical: 8),
+                      child: ListTile(
+                        leading: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            item['imageUrl'] ?? '',
+                            width: 50,
+                            height: 50,
+                            fit: BoxFit.cover,
+                            errorBuilder: (context, error, stackTrace) {
+                              return Container(
+                                width: 50,
+                                height: 50,
+                                color: Colors.grey[300],
+                                child: Icon(Icons.error, color: Colors.red),
+                              );
+                            },
+                          ),
+                        ),
+                        title: Text(item['name'] ?? 'No Name'),
+                        subtitle: Text(
+                          'Qty: $quantity\nPrice: ₹${price.toStringAsFixed(2)}\nSubtotal: ₹${subtotal.toStringAsFixed(2)}',
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              Divider(),
+              Padding(
+                padding: EdgeInsets.symmetric(vertical: 8.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Total Amount:',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.brown[800],
+                      ),
+                    ),
+                    Text(
+                      '₹$totalAmount',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.green[700],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              SizedBox(height: 20),
+              if (isPending) // Show cancel button only if pending
+                _isLoading
+                    ? Center(child: CircularProgressIndicator())
+                    : ElevatedButton(
+                        onPressed: _cancelOrder,
+                        child: Text('Cancel Order'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.red,
+                          minimumSize: Size(double.infinity, 50),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                        ),
+                      ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// Cart Management Class (unchanged)
 class Cart {
   static List<Map<String, dynamic>> cartItems = [];
 

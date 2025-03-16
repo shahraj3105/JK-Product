@@ -5,6 +5,13 @@ import '../services/product_service.dart';
 import '../services/auth_service.dart';
 
 // AdminDashboardScreen (Updated)
+import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:google_fonts/google_fonts.dart';
+import '../services/product_service.dart';
+import '../services/auth_service.dart';
+
+// AdminDashboardScreen (Updated)
 class AdminDashboardScreen extends StatefulWidget {
   @override
   _AdminDashboardScreenState createState() => _AdminDashboardScreenState();
@@ -253,7 +260,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                               MaterialPageRoute(
                                 builder: (context) => OrderDetailsScreen(orderData: orderData),
                               ),
-                            );
+                            ).then((_) => _loadDashboardData()); // Refresh dashboard stats after returning
                           },
                           child: Card(
                             elevation: 4,
@@ -286,10 +293,11 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                   color: Colors.brown[800],
                 ),
               ),
+              SizedBox(height: 10),
               Expanded(
                 child: StreamBuilder<QuerySnapshot>(
                   stream: FirebaseFirestore.instance
-                      .collection('products')
+                      .collection('products') // Fixed: Changed from 'orders' to 'products'
                       .orderBy('createdAt', descending: true)
                       .snapshots(),
                   builder: (context, snapshot) {
@@ -298,6 +306,14 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                     }
                     if (snapshot.connectionState == ConnectionState.waiting) {
                       return Center(child: CircularProgressIndicator());
+                    }
+                    if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+                      return Center(
+                        child: Text(
+                          'No products available',
+                          style: TextStyle(fontSize: 16, color: Colors.grey),
+                        ),
+                      );
                     }
 
                     return ListView(
@@ -327,7 +343,7 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
                                 ),
                               ),
                             ),
-                            title: Text(data['name'] ?? ''),
+                            title: Text(data['name'] ?? 'No Name'),
                             subtitle: Text('₹${data['price']?.toString() ?? '0.0'}'),
                             trailing: IconButton(
                               icon: Icon(Icons.delete, color: Colors.red),
@@ -405,16 +421,89 @@ class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
   }
 }
 
-// New OrderDetailsScreen
-class OrderDetailsScreen extends StatelessWidget {
+// Updated OrderDetailsScreen
+// Updated OrderDetailsScreen with Cancel Button
+class OrderDetailsScreen extends StatefulWidget {
   final Map<String, dynamic> orderData;
 
   OrderDetailsScreen({required this.orderData});
 
   @override
+  _OrderDetailsScreenState createState() => _OrderDetailsScreenState();
+}
+
+class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
+  bool _isLoading = false;
+
+  Future<void> _confirmOrderCompletion() async {
+    setState(() => _isLoading = true);
+    try {
+      await FirebaseFirestore.instance
+          .collection('orders')
+          .doc(widget.orderData['orderId'])
+          .update({
+        'status': 'completed',
+        'completedAt': Timestamp.now(),
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Order marked as completed'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error updating order status: $e'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 3),
+        ),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _cancelOrder() async {
+    setState(() => _isLoading = true);
+    try {
+      await FirebaseFirestore.instance
+          .collection('orders')
+          .doc(widget.orderData['orderId'])
+          .update({
+        'status': 'cancelled',
+        'cancelledAt': Timestamp.now(),
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Order cancelled successfully'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      Navigator.pop(context);
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error cancelling order: $e'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 3),
+        ),
+      );
+    } finally {
+      setState(() => _isLoading = false);
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final items = orderData['items'] as List<dynamic>;
-    final totalAmount = orderData['totalAmount']?.toStringAsFixed(2) ?? '0.0';
+    final items = widget.orderData['items'] as List<dynamic>;
+    final totalAmount = widget.orderData['totalAmount']?.toStringAsFixed(2) ?? '0.0';
+    final isPending = widget.orderData['status'] == 'pending';
 
     return Scaffold(
       appBar: AppBar(
@@ -441,7 +530,7 @@ class OrderDetailsScreen extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'Order ID: ${orderData['orderId']}',
+                'Order ID: ${widget.orderData['orderId']}',
                 style: GoogleFonts.poppins(
                   fontSize: 20,
                   fontWeight: FontWeight.bold,
@@ -450,15 +539,26 @@ class OrderDetailsScreen extends StatelessWidget {
               ),
               SizedBox(height: 10),
               Text(
-                'Customer: ${orderData['userEmail']}',
+                'Customer: ${widget.orderData['userEmail']}',
                 style: TextStyle(fontSize: 16, color: Colors.brown[800]),
               ),
               SizedBox(height: 10),
               Text(
-                'Address: ${orderData['userAddress'] ?? 'No address provided'}',
+                'Address: ${widget.orderData['userAddress'] ?? 'No address provided'}',
                 style: TextStyle(fontSize: 16, color: Colors.brown[800]),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
+              ),
+              SizedBox(height: 10),
+              Text(
+                'Status: ${widget.orderData['status']}',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: widget.orderData['status'] == 'pending'
+                      ? Colors.orange
+                      : (widget.orderData['status'] == 'completed' ? Colors.green[700] : Colors.red),
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               SizedBox(height: 20),
               Text(
@@ -534,6 +634,37 @@ class OrderDetailsScreen extends StatelessWidget {
                   ],
                 ),
               ),
+              SizedBox(height: 20),
+              if (isPending) // Show buttons only if order is pending
+                _isLoading
+                    ? Center(child: CircularProgressIndicator())
+                    : Column(
+                        children: [
+                          ElevatedButton(
+                            onPressed: _confirmOrderCompletion,
+                            child: Text('Confirm Order Completion'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.green[700],
+                              minimumSize: Size(double.infinity, 50),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          ),
+                          SizedBox(height: 10),
+                          ElevatedButton(
+                            onPressed: _cancelOrder,
+                            child: Text('Cancel Order'),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.red,
+                              minimumSize: Size(double.infinity, 50),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
             ],
           ),
         ),
@@ -542,7 +673,7 @@ class OrderDetailsScreen extends StatelessWidget {
   }
 }
 
-// Cart Management Class
+// Cart Management Class (unchanged)
 class Cart {
   static List<Map<String, dynamic>> cartItems = [];
 
